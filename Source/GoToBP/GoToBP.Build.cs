@@ -43,6 +43,7 @@ public class GoToBP : ModuleRules
 				"UnrealEd",
 				"BlueprintGraph",
 				"Projects",
+				"DeveloperSettings",
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);

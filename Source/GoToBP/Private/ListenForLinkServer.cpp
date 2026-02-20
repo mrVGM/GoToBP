@@ -6,6 +6,7 @@
 #include <string>
 #include <variant>
 
+#include "GoToBPDeveloperSettings.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
 #include "Interfaces/IPluginManager.h"
@@ -271,22 +272,19 @@ void UListenForLinkServer::StartListeningForInput()
 	FSlateApplication* slateApp = &FSlateApplication::Get();
 
 	KeyDownHandle = slateApp->OnApplicationPreInputKeyDownListener().AddLambda([this](const FKeyEvent& keyEvent) {
-		FString L = FString::Chr('L');
-		FString keyName = keyEvent.GetKey().GetFName().ToString();
-		if (keyName.Compare(L))
+		FKey ActivationKey = UGoToBP::GetActivationKey();
+		if (keyEvent.GetKey() == ActivationKey)
 		{
-			return;
+			Activated = true;
 		}
-
-		LHit = true;
 	});
 
 	MouseDownHandle = slateApp->OnApplicationMousePreInputButtonDownListener().AddLambda([this, slateApp](const FPointerEvent& pointerEvent) {
-		if (!LHit)
+		if (!Activated)
 		{
 			return;
 		}
-		LHit = false;
+		Activated = false;
 
 		if (!pointerEvent.GetEffectingButton().GetFName().IsEqual("LeftMouseButton"))
 		{

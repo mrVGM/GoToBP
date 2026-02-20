@@ -27,7 +27,7 @@ class GOTOBP_API UListenForLinkServer : public UObject
 	GENERATED_BODY()
 private:
 	
-	bool LHit = false;
+	bool Activated = false;
 	FDelegateHandle KeyDownHandle;
 	FDelegateHandle MouseDownHandle;
 	
