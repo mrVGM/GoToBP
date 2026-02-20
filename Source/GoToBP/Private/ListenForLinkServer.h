@@ -8,13 +8,11 @@
 
 struct FLinkData
 {
-	FTopLevelAssetPath AssetPath;
 	FString Graph;
 	FVector2D Location;
 	
 	friend FArchive& operator<<(FArchive& Ar, FLinkData& Msg)
 	{
-		Ar << Msg.AssetPath;
 		Ar << Msg.Graph;
 		Ar << Msg.Location;
 		return Ar;

@@ -6,9 +6,7 @@
 
 class FGoToBPModule : public IModuleInterface
 {
-private:
-
-	bool RegisterURLHandler();
+	
 public:
 	class UListenForLinkServer* Server = nullptr;
 

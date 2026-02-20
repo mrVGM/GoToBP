@@ -107,13 +107,15 @@ namespace
 
 void UListenForLinkServer::OnMessageReceived(const FString& Message)
 {
-	int index = Message.Find("param=");
-	FString payload = Message.RightChop(index + 6);
-	while (!payload.EndsWith("="))
-	{
-		payload = payload.LeftChop(1);
-	}
+	const FString prefix = "param=";
+	const FString suffix = "-";
 	
+	int index = Message.Find(prefix);
+	FString payload = Message.RightChop(index + prefix.Len());
+
+	index = payload.Find(suffix, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+	payload =  payload.LeftChop(payload.Len() - index);
+
 	TArray<uint8> data;
 	FBase64::Decode(payload, data);
 
@@ -122,6 +124,17 @@ void UListenForLinkServer::OnMessageReceived(const FString& Message)
 	reader << linkData;
 
 	UEdGraph* graph = LoadObject<UEdGraph>(nullptr, *linkData.Graph);
+	if (!graph)
+	{
+		FNotificationInfo Info(FText::FromString("Couldn't find the graph, you are looking for..."));
+		Info.bFireAndForget = true;
+		Info.FadeOutDuration = 2.0f;
+		Info.ExpireDuration = 3.0f;
+		Info.bUseLargeFont = false;
+		FSlateNotificationManager::Get().AddNotification(Info);
+		return;
+	}
+
 	UEdGraphNode* closest = nullptr;
 	auto dist = [&linkData](const UEdGraphNode* node) -> float
 	{
@@ -263,12 +276,12 @@ void UListenForLinkServer::Init()
 	}), 1.0f);
 	
 	StartListeningForInput();
-	
 }
 
 void UListenForLinkServer::Deinit()
 {
 }
+
 void ShowEditorNotification()
 {
 	FNotificationInfo Info(FText::FromString("Operation Completed!"));
@@ -330,35 +343,20 @@ void UListenForLinkServer::StartListeningForInput()
 
 			SGraphEditor* graphEditor = static_cast<SGraphEditor*>(widget);
 			UEdGraph* edGraph = graphEditor->GetCurrentGraph();
-			const UEdGraphSchema* schema = edGraph->GetSchema();
-			const UEdGraphSchema_K2* schemaK2 = Cast<const UEdGraphSchema_K2>(schema);
-
-			if (!schemaK2)
-			{
-				continue;
-			}
-
-			UBlueprint* bp = FBlueprintEditorUtils::FindBlueprintForGraph(edGraph);
-
-			if (!bp)
-			{
-				continue;
-			}
 
 			FVector2D Location = graphEditor->GetPasteLocation();
 			FVector2f mouse(Location.X, Location.Y);
 
-			FTopLevelAssetPath asset = bp->GeneratedClass->GetClassPathName();
 			FString graphPath = edGraph->GetPathName();
 
-			FLinkData data { asset, graphPath, Location };
+			FLinkData data { graphPath, Location };
 			TArray<uint8> buff;
 			FMemoryWriter writer(buff);
 
 			writer << data;
 			FString payload = FBase64::Encode(buff);
 			
-			FString link = FString::Format(TEXT("gotobp://loc?param={0}"), { *payload });
+			FString link = FString::Format(TEXT("gotobp://loc?param={0}-"), { *payload });
 			UE_LOG(LogTemp, Display, TEXT("Location Link: %s"), *link);
 			
 			{
