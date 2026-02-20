@@ -9,9 +9,12 @@
 #include "GoToBPDeveloperSettings.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Interfaces/IPluginManager.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Windows/MinWindows.h"
 
 namespace 
@@ -266,6 +269,16 @@ void UListenForLinkServer::Init()
 void UListenForLinkServer::Deinit()
 {
 }
+void ShowEditorNotification()
+{
+	FNotificationInfo Info(FText::FromString("Operation Completed!"));
+	Info.bFireAndForget = true;
+	Info.FadeOutDuration = 2.0f;
+	Info.ExpireDuration = 3.0f;
+	Info.bUseLargeFont = false;
+
+	FSlateNotificationManager::Get().AddNotification(Info);
+}
 
 void UListenForLinkServer::StartListeningForInput()
 {
@@ -343,8 +356,21 @@ void UListenForLinkServer::StartListeningForInput()
 			FMemoryWriter writer(buff);
 
 			writer << data;
-			FString link = FBase64::Encode(buff);
-			UE_LOG(LogTemp, Display, TEXT("gotobp://loc?param=%s"), *link);
+			FString payload = FBase64::Encode(buff);
+			
+			FString link = FString::Format(TEXT("gotobp://loc?param={0}"), { *payload });
+			UE_LOG(LogTemp, Display, TEXT("Location Link: %s"), *link);
+			
+			{
+				FNotificationInfo Info(FText::FromString("Location Link created and placed in your clipboard!"));
+				Info.bFireAndForget = true;
+				Info.FadeOutDuration = 2.0f;
+				Info.ExpireDuration = 3.0f;
+				Info.bUseLargeFont = false;
+				FSlateNotificationManager::Get().AddNotification(Info);
+				
+				FPlatformApplicationMisc::ClipboardCopy(*link);
+			}
 		}
 	});
 }

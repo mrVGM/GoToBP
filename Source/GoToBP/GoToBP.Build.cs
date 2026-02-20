@@ -44,6 +44,7 @@ public class GoToBP : ModuleRules
 				"BlueprintGraph",
 				"Projects",
 				"DeveloperSettings",
+				"ApplicationCore",
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
