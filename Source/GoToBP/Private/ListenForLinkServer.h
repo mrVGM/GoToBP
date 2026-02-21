@@ -9,7 +9,7 @@
 struct FLinkData
 {
 	FString Graph;
-	FVector2D Location;
+	FVector2f Location;
 	
 	friend FArchive& operator<<(FArchive& Ar, FLinkData& Msg)
 	{
@@ -25,7 +25,7 @@ class GOTOBP_API UListenForLinkServer : public UObject
 	GENERATED_BODY()
 private:
 	
-	bool Activated = false;
+	double ActivatedAt = -1.0;
 	FDelegateHandle KeyDownHandle;
 	FDelegateHandle MouseDownHandle;
 	

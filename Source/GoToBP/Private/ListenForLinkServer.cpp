@@ -143,10 +143,9 @@ void UListenForLinkServer::OnMessageReceived(const FString& Message)
 			return 99999999.0f;
 		}
 
-		auto tmp = node->GetPosition();
-		FVector2D nodePos(tmp.X, tmp.Y);
-
+		auto nodePos = node->GetPosition();
 		auto dist = linkData.Location - nodePos;
+		
 		return static_cast<float>(dist.Length());
 	};
 
@@ -198,7 +197,6 @@ void UListenForLinkServer::Init()
 		bool bound = Sock->Bind(*Addr);
 		Sock->GetAddress(Addr.Get());
 		
-		UE_LOG(LogTemp, Display, TEXT("^^^ Socket Bound %d %d"), bound, Addr->GetPort());
 		Sock->Listen(1);
 		
 		{
@@ -301,16 +299,15 @@ void UListenForLinkServer::StartListeningForInput()
 		FKey ActivationKey = UGoToBP::GetActivationKey();
 		if (keyEvent.GetKey() == ActivationKey)
 		{
-			Activated = true;
+			ActivatedAt = FPlatformTime::Seconds();
 		}
 	});
 
 	MouseDownHandle = slateApp->OnApplicationMousePreInputButtonDownListener().AddLambda([this, slateApp](const FPointerEvent& pointerEvent) {
-		if (!Activated)
+		if (FPlatformTime::Seconds() - ActivatedAt > 1.0f)
 		{
 			return;
 		}
-		Activated = false;
 
 		if (!pointerEvent.GetEffectingButton().GetFName().IsEqual("LeftMouseButton"))
 		{
@@ -344,7 +341,7 @@ void UListenForLinkServer::StartListeningForInput()
 			SGraphEditor* graphEditor = static_cast<SGraphEditor*>(widget);
 			UEdGraph* edGraph = graphEditor->GetCurrentGraph();
 
-			FVector2D Location = graphEditor->GetPasteLocation();
+			FVector2f Location = graphEditor->GetPasteLocation2f();
 			FVector2f mouse(Location.X, Location.Y);
 
 			FString graphPath = edGraph->GetPathName();
