@@ -30,10 +30,10 @@ private:
 	FDelegateHandle MouseDownHandle;
 	
 	void StartListeningForInput();
-	void StopListeningForInput();
-	
-	bool EnableLinks(const FString& ProtocolName, const FString& ApplicationPath);
-	FString GetScriptPath();
+	void StopListeningForInput() const;
+
+	static bool EnableLinks(const FString& ProtocolName, const FString& ApplicationPath);
+	static FString GetScriptPath();
 	
 	void OnMessageReceived(const FString& Message);
 

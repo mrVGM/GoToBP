@@ -107,8 +107,8 @@ namespace
 
 void UListenForLinkServer::OnMessageReceived(const FString& Message)
 {
-	const FString prefix = "param=";
-	const FString suffix = "-";
+	const FString prefix = "path=";
+	const FString suffix = "%";
 	
 	int index = Message.Find(prefix);
 	FString payload = Message.RightChop(index + prefix.Len());
@@ -117,7 +117,7 @@ void UListenForLinkServer::OnMessageReceived(const FString& Message)
 	payload =  payload.LeftChop(payload.Len() - index);
 
 	TArray<uint8> data;
-	FBase64::Decode(payload, data);
+	FBase64::Decode(payload, data, EBase64Mode::UrlSafe);
 
 	FMemoryReader reader(data);
 	FLinkData linkData;
@@ -351,9 +351,9 @@ void UListenForLinkServer::StartListeningForInput()
 			FMemoryWriter writer(buff);
 
 			writer << data;
-			FString payload = FBase64::Encode(buff);
+			FString payload = FBase64::Encode(buff, EBase64Mode::UrlSafe);
 			
-			FString link = FString::Format(TEXT("gotobp://loc?param={0}-"), { *payload });
+			FString link = FString::Format(TEXT("gotobp://loc?path={0}%"), { *payload });
 			UE_LOG(LogTemp, Display, TEXT("Location Link: %s"), *link);
 			
 			{
@@ -370,7 +370,7 @@ void UListenForLinkServer::StartListeningForInput()
 	});
 }
 
-void UListenForLinkServer::StopListeningForInput()
+void UListenForLinkServer::StopListeningForInput() const
 {
 	if (FSlateApplication::IsInitialized())
 	{
@@ -382,79 +382,77 @@ void UListenForLinkServer::StopListeningForInput()
 
 bool UListenForLinkServer::EnableLinks(const FString& ProtocolName, const FString& ApplicationPath)
 {
+	FString baseKeyS = TEXT("Software\\Classes\\") + ProtocolName;
+	std::wstring baseKey = *baseKeyS;
+
+	HKEY hKey;
+	if (RegCreateKeyExW(
+		HKEY_CURRENT_USER,
+		baseKey.c_str(),
+		0, nullptr,
+		REG_OPTION_NON_VOLATILE,
+		KEY_WRITE,
+		nullptr,
+		&hKey,
+		nullptr) != ERROR_SUCCESS)
 	{
-		FString baseKeyS = TEXT("Software\\Classes\\") + ProtocolName;
-		std::wstring baseKey = *baseKeyS;
-
-		HKEY hKey;
-		if (RegCreateKeyExW(
-			HKEY_CURRENT_USER,
-			baseKey.c_str(),
-			0, nullptr,
-			REG_OPTION_NON_VOLATILE,
-			KEY_WRITE,
-			nullptr,
-			&hKey,
-			nullptr) != ERROR_SUCCESS)
-		{
-			return false;
-		}
-
-		FString tmp = FString::Format(TEXT("URL:{0} Protocol"), {*ProtocolName});
-		// Set default value
-		std::wstring description = *tmp;
-		RegSetValueExW(
-			hKey,
-			nullptr,
-			0,
-			REG_SZ,
-			reinterpret_cast<const BYTE*>(description.c_str()),
-			(description.size() + 1) * sizeof(wchar_t));
-
-		// Required empty value
-		const wchar_t* empty = L"";
-		RegSetValueExW(
-			hKey,
-			L"URL Protocol",
-			0,
-			REG_SZ,
-			reinterpret_cast<const BYTE*>(empty),
-			sizeof(wchar_t));
-
-		RegCloseKey(hKey);
-
-		// Create command subkey
-		std::wstring commandKey =
-			baseKey + L"\\shell\\open\\command";
-
-		if (RegCreateKeyExW(
-			HKEY_CURRENT_USER,
-			commandKey.c_str(),
-			0, nullptr,
-			REG_OPTION_NON_VOLATILE,
-			KEY_WRITE,
-			nullptr,
-			&hKey,
-			nullptr) != ERROR_SUCCESS)
-		{
-			return false;
-		}
-
-		FString cmd = FString::Format(TEXT("{0} \"%1\""), {*ApplicationPath});
-		std::wstring command = *cmd;
-
-		RegSetValueExW(
-			hKey,
-			nullptr,
-			0,
-			REG_SZ,
-			reinterpret_cast<const BYTE*>(command.c_str()),
-			(command.size() + 1) * sizeof(wchar_t));
-
-		RegCloseKey(hKey);
-
-		return true;
+		return false;
 	}
+
+	FString tmp = FString::Format(TEXT("URL:{0} Protocol"), {*ProtocolName});
+	// Set default value
+	std::wstring description = *tmp;
+	RegSetValueExW(
+		hKey,
+		nullptr,
+		0,
+		REG_SZ,
+		reinterpret_cast<const BYTE*>(description.c_str()),
+		(description.size() + 1) * sizeof(wchar_t));
+
+	// Required empty value
+	const wchar_t* empty = L"";
+	RegSetValueExW(
+		hKey,
+		L"URL Protocol",
+		0,
+		REG_SZ,
+		reinterpret_cast<const BYTE*>(empty),
+		sizeof(wchar_t));
+
+	RegCloseKey(hKey);
+
+	// Create command subkey
+	std::wstring commandKey =
+		baseKey + L"\\shell\\open\\command";
+
+	if (RegCreateKeyExW(
+		HKEY_CURRENT_USER,
+		commandKey.c_str(),
+		0, nullptr,
+		REG_OPTION_NON_VOLATILE,
+		KEY_WRITE,
+		nullptr,
+		&hKey,
+		nullptr) != ERROR_SUCCESS)
+	{
+		return false;
+	}
+
+	FString cmd = FString::Format(TEXT("{0} \"%1\""), {*ApplicationPath});
+	std::wstring command = *cmd;
+
+	RegSetValueExW(
+		hKey,
+		nullptr,
+		0,
+		REG_SZ,
+		reinterpret_cast<const BYTE*>(command.c_str()),
+		(command.size() + 1) * sizeof(wchar_t));
+
+	RegCloseKey(hKey);
+
+	return true;
 }
 
 FString UListenForLinkServer::GetScriptPath()
@@ -462,7 +460,7 @@ FString UListenForLinkServer::GetScriptPath()
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT(PLUGIN_NAME));
 	FString PluginBaseDir = Plugin->GetBaseDir(); // Folder of the plugin
 	FString AbsolutePath = FPaths::ConvertRelativePathToFull(PluginBaseDir);
-	FString scriptPath = FPaths::Combine(AbsolutePath, "Scripts/TCPReq.ps1");
+	FString scriptPath = FPaths::Combine(AbsolutePath, "Scripts/MakeReqToUE.ps1");
 
 	return scriptPath;
 }
