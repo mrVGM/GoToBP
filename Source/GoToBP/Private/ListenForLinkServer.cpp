@@ -340,9 +340,17 @@ void UListenForLinkServer::StartListeningForInput()
 
 			SGraphEditor* graphEditor = static_cast<SGraphEditor*>(widget);
 			UEdGraph* edGraph = graphEditor->GetCurrentGraph();
+			
+			UObject* asset = nullptr;
+			{
+				UPackage* package = edGraph->GetPackage();
+				if (package)
+				{
+					asset = package->FindAssetInPackage();
+				}
+			}
 
 			FVector2f Location = graphEditor->GetPasteLocation2f();
-			FVector2f mouse(Location.X, Location.Y);
 
 			FString graphPath = edGraph->GetPathName();
 
@@ -354,6 +362,16 @@ void UListenForLinkServer::StartListeningForInput()
 			FString payload = FBase64::Encode(buff, EBase64Mode::UrlSafe);
 			
 			FString link = FString::Format(TEXT("gotobp://loc?path={0}%"), { *payload });
+			if (asset)
+			{
+				link = FString::Format(
+					TEXT("{0} - {1}"),
+					{
+						asset->GetName(),
+						link
+					}
+				);
+			}
 			UE_LOG(LogTemp, Display, TEXT("Location Link: %s"), *link);
 			
 			{
