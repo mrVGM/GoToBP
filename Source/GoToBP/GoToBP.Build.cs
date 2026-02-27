@@ -41,6 +41,7 @@ public class GoToBP : ModuleRules
 				"InputCore",
 				"Sockets",
 				"UnrealEd",
+				"EditorFramework",
 				"BlueprintGraph",
 				"Projects",
 				"DeveloperSettings",

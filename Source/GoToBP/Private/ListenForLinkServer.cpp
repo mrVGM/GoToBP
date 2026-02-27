@@ -12,21 +12,22 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Interfaces/IPluginManager.h"
-#include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Toolkits/ToolkitManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Windows/MinWindows.h"
 
-namespace 
+namespace
 {
 	struct Blocker
 	{
 		std::coroutine_handle<> _h;
-		
+
 		bool await_ready() const noexcept
 		{
 			return false;
 		}
+
 		void await_suspend(std::coroutine_handle<> handle)
 		{
 			_h = handle;
@@ -44,7 +45,7 @@ namespace
 			}
 		}
 	};
-	
+
 	struct Coroutine
 	{
 		struct promise_type
@@ -53,24 +54,28 @@ namespace
 			{
 				return Coroutine(std::coroutine_handle<promise_type>::from_promise(*this));
 			}
+
 			std::suspend_never initial_suspend() noexcept
 			{
 				return std::suspend_never{};
 			}
+
 			std::suspend_never final_suspend() noexcept
 			{
 				return std::suspend_never{};
 			}
-			
+
 			void unhandled_exception()
 			{
 			}
+
 			void return_void()
 			{
 			}
 		};
 
 		std::coroutine_handle<promise_type> handle;
+
 		Coroutine(std::coroutine_handle<promise_type> h) :
 			handle(h)
 		{
@@ -80,11 +85,12 @@ namespace
 	struct CoroutineContainer
 	{
 		Coroutine _crt;
+
 		CoroutineContainer(const Coroutine& crt) :
 			_crt(crt)
 		{
 		}
-		
+
 		~CoroutineContainer()
 		{
 			_crt.handle.destroy();
@@ -102,6 +108,80 @@ namespace
 		}
 		return std::get<Blocker>(_blocker);
 	}
+
+	UObject* FindAssetFromGraph(UObject* graph)
+	{
+		UPackage* package = graph->GetPackage();
+		if (!package)
+		{
+			return nullptr;
+		}
+
+		return package->FindAssetInPackage();
+	}
+
+	bool OpenEditorForGraph(const FLinkData& linkData)
+	{
+		UEdGraph* graph = LoadObject<UEdGraph>(nullptr, *linkData.Graph);
+		if (!graph)
+		{
+			return false;
+		}
+		
+		UEdGraphNode* closest = nullptr;
+		auto dist = [&linkData](const UEdGraphNode* node) -> float
+		{
+			if (!node)
+			{
+				return 99999999.0f;
+			}
+
+			auto nodePos = node->GetPosition();
+			auto dist = linkData.Location - nodePos;
+
+			return static_cast<float>(dist.Length());
+		};
+
+		for (UEdGraphNode* node : graph->Nodes)
+		{
+			if (!closest)
+			{
+				closest = node;
+				continue;
+			}
+			if (dist(closest) > dist(node))
+			{
+				closest = node;
+			}
+		}
+
+		UObject* asset = FindAssetFromGraph(graph);
+	
+		bool opened = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(asset);
+		if (!opened)
+		{
+			return false;
+		}
+		TSharedPtr<IToolkit> FoundAssetEditor = FToolkitManager::Get().FindEditorForAsset(asset);
+		if (!FoundAssetEditor.IsValid())
+		{
+			return false;
+		}
+
+		FoundAssetEditor->BringToolkitToFront();
+		if (FoundAssetEditor->IsBlueprintEditor())
+		{
+			if (!closest)
+			{
+				FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(graph);
+			}
+			else
+			{
+				FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(closest);
+			}
+		}
+		return true;
+	}
 }
 
 
@@ -109,12 +189,12 @@ void UListenForLinkServer::OnMessageReceived(const FString& Message)
 {
 	const FString prefix = "path=";
 	const FString suffix = "%";
-	
+
 	int index = Message.Find(prefix);
 	FString payload = Message.RightChop(index + prefix.Len());
 
 	index = payload.Find(suffix, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
-	payload =  payload.LeftChop(payload.Len() - index);
+	payload = payload.LeftChop(payload.Len() - index);
 
 	TArray<uint8> data;
 	FBase64::Decode(payload, data, EBase64Mode::UrlSafe);
@@ -123,8 +203,9 @@ void UListenForLinkServer::OnMessageReceived(const FString& Message)
 	FLinkData linkData;
 	reader << linkData;
 
-	UEdGraph* graph = LoadObject<UEdGraph>(nullptr, *linkData.Graph);
-	if (!graph)
+	bool editorOpened = OpenEditorForGraph(linkData);
+
+	if (!editorOpened)
 	{
 		FNotificationInfo Info(FText::FromString("Couldn't find the graph, you are looking for..."));
 		Info.bFireAndForget = true;
@@ -132,43 +213,6 @@ void UListenForLinkServer::OnMessageReceived(const FString& Message)
 		Info.ExpireDuration = 3.0f;
 		Info.bUseLargeFont = false;
 		FSlateNotificationManager::Get().AddNotification(Info);
-		return;
-	}
-
-	UEdGraphNode* closest = nullptr;
-	auto dist = [&linkData](const UEdGraphNode* node) -> float
-	{
-		if (!node)
-		{
-			return 99999999.0f;
-		}
-
-		auto nodePos = node->GetPosition();
-		auto dist = linkData.Location - nodePos;
-		
-		return static_cast<float>(dist.Length());
-	};
-
-	for (UEdGraphNode* node : graph->Nodes)
-	{
-		if (!closest)
-		{
-			closest = node;
-			continue;
-		}
-		if (dist(closest) > dist(node))
-		{
-			closest = node;
-		}
-	}
-
-	if (!closest)
-	{
-		FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(graph);
-	}
-	else
-	{
-		FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(closest);
 	}
 }
 
@@ -178,7 +222,7 @@ void UListenForLinkServer::Init()
 	{
 		Blocker& blocker = GetBlocker();
 		co_await blocker;
-		
+
 		ISocketSubsystem* SocketSubsystem = nullptr;
 		SocketSubsystem = ISocketSubsystem::Get();
 		while (!SocketSubsystem)
@@ -186,7 +230,7 @@ void UListenForLinkServer::Init()
 			co_await blocker;
 			SocketSubsystem = ISocketSubsystem::Get();
 		}
-		
+
 		FSocket* Sock = SocketSubsystem->CreateSocket("Local Log Socket", "Local Log Socket");
 		Sock->SetNonBlocking(true);
 		TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
@@ -196,15 +240,15 @@ void UListenForLinkServer::Init()
 
 		bool bound = Sock->Bind(*Addr);
 		Sock->GetAddress(Addr.Get());
-		
+
 		Sock->Listen(1);
-		
+
 		{
 			FString scriptPath = GetScriptPath();
 			FString command = FString::Format(TEXT("powershell -executionpolicy bypass -File \"{0}\" {1}"), {scriptPath, Addr->GetPort()});
 			EnableLinks("gotobp", command);
 		}
-		
+
 		FString MessageBuff = "";
 		FSocket* conn = nullptr;
 		while (true)
@@ -266,13 +310,13 @@ void UListenForLinkServer::Init()
 		}
 	};
 	_crt.emplace<CoroutineContainer>(crt());
-	
+
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([this](float dt) -> bool
 	{
 		GetBlocker().Unblock();
 		return true;
 	}), 1.0f);
-	
+
 	StartListeningForInput();
 }
 
@@ -295,7 +339,8 @@ void UListenForLinkServer::StartListeningForInput()
 {
 	FSlateApplication* slateApp = &FSlateApplication::Get();
 
-	KeyDownHandle = slateApp->OnApplicationPreInputKeyDownListener().AddLambda([this](const FKeyEvent& keyEvent) {
+	KeyDownHandle = slateApp->OnApplicationPreInputKeyDownListener().AddLambda([this](const FKeyEvent& keyEvent)
+	{
 		FKey ActivationKey = UGoToBP::GetActivationKey();
 		if (keyEvent.GetKey() == ActivationKey)
 		{
@@ -303,7 +348,8 @@ void UListenForLinkServer::StartListeningForInput()
 		}
 	});
 
-	MouseDownHandle = slateApp->OnApplicationMousePreInputButtonDownListener().AddLambda([this, slateApp](const FPointerEvent& pointerEvent) {
+	MouseDownHandle = slateApp->OnApplicationMousePreInputButtonDownListener().AddLambda([this, slateApp](const FPointerEvent& pointerEvent)
+	{
 		if (FPlatformTime::Seconds() - ActivatedAt > 1.0f)
 		{
 			return;
@@ -340,28 +386,20 @@ void UListenForLinkServer::StartListeningForInput()
 
 			SGraphEditor* graphEditor = static_cast<SGraphEditor*>(widget);
 			UEdGraph* edGraph = graphEditor->GetCurrentGraph();
-			
-			UObject* asset = nullptr;
-			{
-				UPackage* package = edGraph->GetPackage();
-				if (package)
-				{
-					asset = package->FindAssetInPackage();
-				}
-			}
 
 			FVector2f Location = graphEditor->GetPasteLocation2f();
 
 			FString graphPath = edGraph->GetPathName();
 
-			FLinkData data { graphPath, Location };
+			FLinkData data{graphPath, Location};
 			TArray<uint8> buff;
 			FMemoryWriter writer(buff);
 
 			writer << data;
 			FString payload = FBase64::Encode(buff, EBase64Mode::UrlSafe);
-			
-			FString link = FString::Format(TEXT("gotobp://loc?path={0}%"), { *payload });
+
+			FString link = FString::Format(TEXT("gotobp://loc?path={0}%"), {*payload});
+			UObject* asset = FindAssetFromGraph(edGraph);
 			if (asset)
 			{
 				link = FString::Format(
@@ -373,7 +411,7 @@ void UListenForLinkServer::StartListeningForInput()
 				);
 			}
 			UE_LOG(LogTemp, Display, TEXT("Location Link: %s"), *link);
-			
+
 			{
 				FNotificationInfo Info(FText::FromString("Location Link created and placed in your clipboard!"));
 				Info.bFireAndForget = true;
@@ -381,7 +419,7 @@ void UListenForLinkServer::StartListeningForInput()
 				Info.ExpireDuration = 3.0f;
 				Info.bUseLargeFont = false;
 				FSlateNotificationManager::Get().AddNotification(Info);
-				
+
 				FPlatformApplicationMisc::ClipboardCopy(*link);
 			}
 		}
