@@ -2,6 +2,7 @@
 
 #include "ListenForLinkServer.h"
 
+#include <corecrt_io.h>
 #include <coroutine>
 #include <string>
 #include <variant>
@@ -235,90 +236,75 @@ void UListenForLinkServer::Init()
 		Blocker& blocker = GetBlocker();
 		co_await blocker;
 
-		ISocketSubsystem* SocketSubsystem = nullptr;
-		SocketSubsystem = ISocketSubsystem::Get();
-		while (!SocketSubsystem)
+		FGuid guid = FGuid::NewGuid();
+		FString guidStr = LexToString(guid);
+		FString pipeName = FString::Format(TEXT("\\\\.\\pipe\\{0}"),
 		{
-			co_await blocker;
-			SocketSubsystem = ISocketSubsystem::Get();
-		}
+			*guidStr,
+		});
+		
+		FString command = FString::Format(TEXT("cmd /c echo %1 > {0}"), { pipeName });
+		EnableLinks("gotobp", command);
 
-		FSocket* Sock = SocketSubsystem->CreateSocket("Local Log Socket", "Local Log Socket");
-		Sock->SetNonBlocking(true);
-		TSharedRef<FInternetAddr> Addr = SocketSubsystem->CreateInternetAddr();
-		bool validIP = false;
-		Addr->SetIp(TEXT("127.0.0.1"), validIP);
-		Addr->SetPort(0);
+		HANDLE hPipe = CreateNamedPipe(
+				*pipeName,
+				PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+				PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+				1,              // max instances
+				4096, 4096,     // out/in buffer sizes
+				0,
+				nullptr
+			);
 
-		bool bound = Sock->Bind(*Addr);
-		Sock->GetAddress(Addr.Get());
-
-		Sock->Listen(1);
-
-		{
-			FString scriptPath = GetScriptPath();
-			FString command = FString::Format(TEXT("powershell -executionpolicy bypass -File \"{0}\" {1}"), {scriptPath, Addr->GetPort()});
-			EnableLinks("gotobp", command);
-		}
-
-		FString MessageBuff = "";
-		FSocket* conn = nullptr;
+		FString strBuff;
 		while (true)
 		{
-			while (!conn)
 			{
-				conn = Sock->Accept("Incoming Link");
-				if (!conn)
+				OVERLAPPED ov = {};
+				bool connected = ConnectNamedPipe(hPipe, &ov);
+				if (!connected)
 				{
-					co_await blocker;
+					while (!HasOverlappedIoCompleted(&ov))
+					{
+						co_await blocker;
+					}
 				}
 			}
-
-			auto tryRead = [conn, &MessageBuff](bool& bSuccessful, int32& read)
-			{
-				constexpr uint16 buffSize = 1024;
-				uint8 buff[buffSize + 1] = {};
-				bSuccessful = conn->Recv(
-					buff,
-					buffSize,
-					read
-				);
-
-				MessageBuff += reinterpret_cast<char*>(buff);
-			};
 
 			while (true)
 			{
-				bool bSuccessful = false;
-				int32 read = 0;
+				OVERLAPPED ov = {};
+				char buff[513] = {};
+				BOOL res = ReadFile(
+					hPipe,
+					buff,
+					sizeof(buff) - 1,
+					nullptr,
+					&ov
+				);
 
-				tryRead(bSuccessful, read);
-				while (true)
+				if (res)
 				{
-					int32 outIndex = 0;
-					bool found = MessageBuff.FindChar('|', outIndex);
-					if (!found)
-					{
-						break;
-					}
+					DWORD read = 0;
+					GetOverlappedResult(hPipe, &ov, &read, TRUE);
+					strBuff += buff;
+					UE_LOG(LogTemp, Log, TEXT("ReadFile"));
+					OnMessageReceived(strBuff);
+					strBuff = "";
 
-					FString Message = MessageBuff.Left(outIndex + 1);
-					MessageBuff = MessageBuff.RightChop(outIndex + 1);
-					OnMessageReceived(Message);
-				}
-
-				if (!bSuccessful)
-				{
-					SocketSubsystem->DestroySocket(conn);
-					conn = nullptr;
+					DisconnectNamedPipe(hPipe);
 					break;
 				}
-				if (read < 0)
+
+				while (!HasOverlappedIoCompleted(&ov))
 				{
-					break;
+					co_await blocker;
 				}
+
+				DWORD read = 0;
+				GetOverlappedResult(hPipe, &ov, &read, TRUE);
+				strBuff += buff;
 			}
-			co_await blocker;
 		}
 	};
 	_crt.emplace<CoroutineContainer>(crt());
@@ -448,7 +434,7 @@ void UListenForLinkServer::StopListeningForInput() const
 	}
 }
 
-bool UListenForLinkServer::EnableLinks(const FString& ProtocolName, const FString& ApplicationPath)
+bool UListenForLinkServer::EnableLinks(const FString& ProtocolName, const FString& Command)
 {
 	FString baseKeyS = TEXT("Software\\Classes\\") + ProtocolName;
 	std::wstring baseKey = *baseKeyS;
@@ -506,10 +492,8 @@ bool UListenForLinkServer::EnableLinks(const FString& ProtocolName, const FStrin
 	{
 		return false;
 	}
-
-	FString cmd = FString::Format(TEXT("{0} \"%1\""), {*ApplicationPath});
-	std::wstring command = *cmd;
-
+	
+	std::wstring command = *Command;
 	RegSetValueExW(
 		hKey,
 		nullptr,

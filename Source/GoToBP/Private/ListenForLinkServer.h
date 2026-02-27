@@ -24,7 +24,7 @@ class GOTOBP_API UListenForLinkServer : public UObject
 {
 	GENERATED_BODY()
 private:
-	
+
 	double ActivatedAt = -1.0;
 	FDelegateHandle KeyDownHandle;
 	FDelegateHandle MouseDownHandle;
@@ -32,7 +32,7 @@ private:
 	void StartListeningForInput();
 	void StopListeningForInput() const;
 
-	static bool EnableLinks(const FString& ProtocolName, const FString& ApplicationPath);
+	static bool EnableLinks(const FString& ProtocolName, const FString& Command);
 	static FString GetScriptPath();
 	
 	void OnMessageReceived(const FString& Message);
