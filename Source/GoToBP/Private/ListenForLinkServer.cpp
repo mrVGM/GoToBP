@@ -7,6 +7,7 @@
 #include <variant>
 
 #include "GoToBPDeveloperSettings.h"
+#include "IBehaviorTreeEditor.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -169,6 +170,8 @@ namespace
 		}
 
 		FoundAssetEditor->BringToolkitToFront();
+		FName toolkitName = FoundAssetEditor->GetToolkitFName();
+		
 		if (FoundAssetEditor->IsBlueprintEditor())
 		{
 			if (!closest)
@@ -180,6 +183,15 @@ namespace
 				FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(closest);
 			}
 		}
+		else if (toolkitName.IsEqual("Behavior Tree"))
+		{
+			IBehaviorTreeEditor* btEditor = static_cast<IBehaviorTreeEditor*>(FoundAssetEditor.Get());
+			if (closest)
+			{
+				btEditor->FocusAttentionOnNode(closest);
+			}
+		}
+		
 		return true;
 	}
 }

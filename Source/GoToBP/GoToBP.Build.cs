@@ -46,6 +46,7 @@ public class GoToBP : ModuleRules
 				"Projects",
 				"DeveloperSettings",
 				"ApplicationCore",
+				"BehaviorTreeEditor",
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
