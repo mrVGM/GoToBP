@@ -39,19 +39,15 @@ public class GoToBP : ModuleRules
 				"Slate",
 				"SlateCore",
 				"InputCore",
-				"Sockets",
 				"UnrealEd",
 				"EditorFramework",
 				"BlueprintGraph",
-				"Projects",
 				"DeveloperSettings",
 				"ApplicationCore",
 				"BehaviorTreeEditor",
 				// ... add private dependencies that you statically link with here ...	
 			}
-			);
-
-		PrivateDefinitions.Add($"PLUGIN_NAME=\"{Name}\"");
+		);
 		
 		DynamicallyLoadedModuleNames.AddRange(
 			new string[]

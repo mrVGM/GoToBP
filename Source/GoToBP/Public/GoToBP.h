@@ -6,12 +6,13 @@
 
 class FGoToBPModule : public IModuleInterface
 {
+private:
+	class UListenForLinkServer* Server = nullptr;
 	
 public:
-	class UListenForLinkServer* Server = nullptr;
 
 	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
-
+	
 };
