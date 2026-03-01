@@ -13,7 +13,7 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Toolkits/ToolkitManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
-#include "Windows/MinWindows.h"
+#include "Windows/WindowsHWrapper.h"
 
 namespace
 {
@@ -475,7 +475,7 @@ void UListenForLinkServer::Init()
 				);
 
 				DWORD read = 0;
-				GetOverlappedResult(hPipe, &ov, &read, TRUE);
+				GetOverlappedResult(hPipe, &ov, &read, 1);
 				strBuff += buff;
 				
 				if (res)
