@@ -5,7 +5,7 @@
 #include <string>
 
 #include "ListenForLinkServer.h"
-#include "Windows/MinWindows.h"
+#include "Windows/WindowsHWrapper.h"
 
 #define LOCTEXT_NAMESPACE "FGoToBPModule"
 
