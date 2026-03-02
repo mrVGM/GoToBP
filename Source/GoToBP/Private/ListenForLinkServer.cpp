@@ -309,9 +309,9 @@ namespace
 				if (newWorld)
 				{
 					GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(asset);
+					FindClosestNodeInGraph(linkData.Graph, linkData.Location, graph, closest);
 				}
 
-				FindClosestNodeInGraph(linkData.Graph, linkData.Location, graph, closest);
 				FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(
 					static_cast<bool>(closest)
 					? static_cast<UObject*>(closest)
@@ -552,4 +552,5 @@ void UListenForLinkServer::Deinit()
 	{
 		CloseHandle(Pipe);
 	}
+	Pipe = nullptr;
 }
