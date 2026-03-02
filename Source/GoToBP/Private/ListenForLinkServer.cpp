@@ -6,6 +6,7 @@
 #include <string>
 #include <variant>
 
+#include "EditorLevelUtils.h"
 #include "GoToBPDeveloperSettings.h"
 #include "IBehaviorTreeEditor.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -236,16 +237,18 @@ void UListenForLinkServer::StopListeningForInput() const
 
 namespace
 {
-	bool OpenEditorForGraph(const FLinkData& linkData)
+	void FindClosestNodeInGraph(const FString& GraphName, FVector2f Location, UEdGraph*& OutGraph, UEdGraphNode*& OutClosest)
 	{
-		UEdGraph* graph = LoadObject<UEdGraph>(nullptr, *linkData.Graph);
-		if (!graph)
+		OutGraph = nullptr;
+		OutClosest = nullptr;
+		
+		OutGraph = LoadObject<UEdGraph>(nullptr, *GraphName);
+		if (!OutGraph)
 		{
-			return false;
+			return;
 		}
 		
-		UEdGraphNode* closest = nullptr;
-		auto dist = [&linkData](const UEdGraphNode* node) -> float
+		auto dist = [&](const UEdGraphNode* node) -> float
 		{
 			if (!node)
 			{
@@ -253,31 +256,77 @@ namespace
 			}
 
 			auto nodePos = node->GetPosition();
-			auto dist = linkData.Location - nodePos;
+			auto dist = Location - nodePos;
 
-			return static_cast<float>(dist.Length());
+			return dist.Length();
 		};
 
-		for (UEdGraphNode* node : graph->Nodes)
+		for (UEdGraphNode* node : OutGraph->Nodes)
 		{
-			if (!closest)
+			if (!OutClosest)
 			{
-				closest = node;
+				OutClosest = node;
 				continue;
 			}
-			if (dist(closest) > dist(node))
+			if (dist(OutClosest) > dist(node))
 			{
-				closest = node;
+				OutClosest = node;
 			}
+		}
+	}
+	
+	bool OpenEditorForGraph(const FLinkData& linkData)
+	{
+		UEdGraph* graph = nullptr;
+		UEdGraphNode* closest = nullptr;
+		FindClosestNodeInGraph(linkData.Graph, linkData.Location, graph, closest);
+		
+		if (!graph)
+		{
+			return false;
 		}
 
 		UObject* asset = FindAssetFromGraph(graph);
-	
+		{
+			UClass* assetClass = asset->GetClass();
+			if (assetClass->IsChildOf<UWorld>())
+			{
+				FWorldContext& editorWorld = GEditor->GetEditorWorldContext();
+				UWorld* world = editorWorld.World();
+
+				TArray<UWorld*> allWorlds;
+				UEditorLevelUtils::GetWorlds(world, allWorlds, true);
+
+				bool newWorld = true;
+				for (UWorld* cur : allWorlds)
+				{
+					if (cur == asset)
+					{
+						newWorld = false;
+						break;
+					}
+				}
+				if (newWorld)
+				{
+					GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(asset);
+				}
+
+				FindClosestNodeInGraph(linkData.Graph, linkData.Location, graph, closest);
+				FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(
+					static_cast<bool>(closest)
+					? static_cast<UObject*>(closest)
+					: static_cast<UObject*>(graph)
+				);
+				return true;
+			}
+		}
+
 		bool opened = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(asset);
 		if (!opened)
 		{
 			return false;
 		}
+		
 		TSharedPtr<IToolkit> FoundAssetEditor = FToolkitManager::Get().FindEditorForAsset(asset);
 		if (!FoundAssetEditor.IsValid())
 		{
@@ -289,14 +338,11 @@ namespace
 		
 		if (FoundAssetEditor->IsBlueprintEditor())
 		{
-			if (!closest)
-			{
-				FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(graph);
-			}
-			else
-			{
-				FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(closest);
-			}
+			FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(
+				static_cast<bool>(closest)
+				? static_cast<UObject*>(closest)
+				: static_cast<UObject*>(graph)
+			);
 		}
 		else if (toolkitName.IsEqual("Behavior Tree"))
 		{
