@@ -7,7 +7,8 @@
 #include <variant>
 
 #include "EditorLevelUtils.h"
-#include "GoToBPDeveloperSettings.h"
+#include "FileHelpers.h"
+#include "GraphEditorModule.h"
 #include "IBehaviorTreeEditor.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "HAL/PlatformApplicationMisc.h"
@@ -22,7 +23,7 @@ namespace
 	{
 		FString Graph;
 		FVector2f Location;
-	
+
 		friend FArchive& operator<<(FArchive& Ar, FLinkData& Msg)
 		{
 			Ar << Msg.Graph;
@@ -30,7 +31,7 @@ namespace
 			return Ar;
 		}
 	};
-	
+
 	struct Blocker
 	{
 		std::coroutine_handle<> _h;
@@ -121,7 +122,7 @@ namespace
 		return std::get<Blocker>(_blocker);
 	}
 
-	UObject* FindAssetFromGraph(UObject* graph)
+	UObject* FindAssetFromGraph(const UObject* graph)
 	{
 		UPackage* package = graph->GetPackage();
 		if (!package)
@@ -132,122 +133,62 @@ namespace
 		return package->FindAssetInPackage();
 	}
 
-}
-
-void UListenForLinkServer::StartListeningForInput()
-{
-	FSlateApplication* slateApp = &FSlateApplication::Get();
-
-	KeyDownHandle = slateApp->OnApplicationPreInputKeyDownListener().AddLambda([this](const FKeyEvent& keyEvent)
+	FString CreateLocationLink(const UEdGraph* Graph, FVector2f MouseLocation, const UEdGraphNode* Node)
 	{
-		FKey ActivationKey = UGoToBP::GetActivationKey();
-		if (keyEvent.GetKey() == ActivationKey)
-		{
-			ActivatedAt = FPlatformTime::Seconds();
-		}
-	});
+		FString graphPath = Graph->GetPathName();
 
-	MouseDownHandle = slateApp->OnApplicationMousePreInputButtonDownListener().AddLambda([this, slateApp](const FPointerEvent& pointerEvent)
-	{
-		if (FPlatformTime::Seconds() - ActivatedAt > 1.0f)
+		FVector2f Location = MouseLocation;
+		if (Node)
 		{
-			return;
+			Location = Node->GetPosition();
 		}
 
-		if (!pointerEvent.GetEffectingButton().GetFName().IsEqual("LeftMouseButton"))
+		FLinkData data{graphPath, Location};
+		TArray<uint8> buff;
+		FMemoryWriter writer(buff);
+
+		writer << data;
+		FString payload = FBase64::Encode(buff, EBase64Mode::UrlSafe);
+
+		FString link = FString::Format(TEXT("gotobp://loc?path={0}%"), {*payload});
+		UObject* asset = FindAssetFromGraph(Graph);
+		if (asset)
 		{
-			return;
+			link = FString::Format(
+				TEXT("{0} - {1}"),
+				{
+					asset->GetName(),
+					link
+				}
+			);
 		}
 
-		TSharedPtr<FSlateUser> user = slateApp->GetUser(pointerEvent);
-		FWeakWidgetPath weakWidgetsPath = user->GetLastWidgetsUnderCursor();
-
-		if (!weakWidgetsPath.IsValid())
+		UE_LOG(LogTemp, Display, TEXT("Location Link: %s"), *link);
 		{
-			return;
+			FNotificationInfo Info(FText::FromString("Location Link created and placed in your clipboard!"));
+			Info.bFireAndForget = true;
+			Info.FadeOutDuration = 2.0f;
+			Info.ExpireDuration = 3.0f;
+			Info.bUseLargeFont = false;
+			FSlateNotificationManager::Get().AddNotification(Info);
+
+			FPlatformApplicationMisc::ClipboardCopy(*link);
 		}
 
-		for (int i = 0; i < weakWidgetsPath.Widgets.Num(); ++i)
-		{
-			TWeakPtr<SWidget> cur = weakWidgetsPath.Widgets[i];
-			if (!cur.IsValid())
-			{
-				continue;
-			}
-
-			SWidget* widget = cur.Pin().Get();
-			FName type = widget->GetType();
-
-			if (!type.IsEqual("SGraphEditor"))
-			{
-				continue;
-			}
-
-			SGraphEditor* graphEditor = static_cast<SGraphEditor*>(widget);
-			UEdGraph* edGraph = graphEditor->GetCurrentGraph();
-
-			FVector2f Location = graphEditor->GetPasteLocation2f();
-
-			FString graphPath = edGraph->GetPathName();
-
-			FLinkData data{graphPath, Location};
-			TArray<uint8> buff;
-			FMemoryWriter writer(buff);
-
-			writer << data;
-			FString payload = FBase64::Encode(buff, EBase64Mode::UrlSafe);
-
-			FString link = FString::Format(TEXT("gotobp://loc?path={0}%"), {*payload});
-			UObject* asset = FindAssetFromGraph(edGraph);
-			if (asset)
-			{
-				link = FString::Format(
-					TEXT("{0} - {1}"),
-					{
-						asset->GetName(),
-						link
-					}
-				);
-			}
-			UE_LOG(LogTemp, Display, TEXT("Location Link: %s"), *link);
-
-			{
-				FNotificationInfo Info(FText::FromString("Location Link created and placed in your clipboard!"));
-				Info.bFireAndForget = true;
-				Info.FadeOutDuration = 2.0f;
-				Info.ExpireDuration = 3.0f;
-				Info.bUseLargeFont = false;
-				FSlateNotificationManager::Get().AddNotification(Info);
-
-				FPlatformApplicationMisc::ClipboardCopy(*link);
-			}
-		}
-	});
-}
-
-void UListenForLinkServer::StopListeningForInput() const
-{
-	if (FSlateApplication::IsInitialized())
-	{
-		FSlateApplication& slateApp = FSlateApplication::Get();
-		slateApp.OnApplicationPreInputKeyDownListener().Remove(KeyDownHandle);
-		slateApp.OnApplicationMousePreInputButtonDownListener().Remove(MouseDownHandle);
+		return link;
 	}
-}
 
-namespace
-{
 	void FindClosestNodeInGraph(const FString& GraphName, FVector2f Location, UEdGraph*& OutGraph, UEdGraphNode*& OutClosest)
 	{
 		OutGraph = nullptr;
 		OutClosest = nullptr;
-		
+
 		OutGraph = LoadObject<UEdGraph>(nullptr, *GraphName);
 		if (!OutGraph)
 		{
 			return;
 		}
-		
+
 		auto dist = [&](const UEdGraphNode* node) -> float
 		{
 			if (!node)
@@ -255,8 +196,8 @@ namespace
 				return 99999999.0f;
 			}
 
-			auto nodePos = node->GetPosition();
-			auto dist = Location - nodePos;
+			FVector2f nodePos = node->GetPosition();
+			FVector2f dist = Location - nodePos;
 
 			return dist.Length();
 		};
@@ -274,13 +215,13 @@ namespace
 			}
 		}
 	}
-	
+
 	bool OpenEditorForGraph(const FLinkData& linkData)
 	{
 		UEdGraph* graph = nullptr;
 		UEdGraphNode* closest = nullptr;
 		FindClosestNodeInGraph(linkData.Graph, linkData.Location, graph, closest);
-		
+
 		if (!graph)
 		{
 			return false;
@@ -308,6 +249,11 @@ namespace
 				}
 				if (newWorld)
 				{
+					FEditorFileUtils::SaveDirtyPackages(
+						true,
+						true,
+						false
+						);
 					GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(asset);
 					FindClosestNodeInGraph(linkData.Graph, linkData.Location, graph, closest);
 				}
@@ -326,7 +272,7 @@ namespace
 		{
 			return false;
 		}
-		
+
 		TSharedPtr<IToolkit> FoundAssetEditor = FToolkitManager::Get().FindEditorForAsset(asset);
 		if (!FoundAssetEditor.IsValid())
 		{
@@ -335,7 +281,7 @@ namespace
 
 		FoundAssetEditor->BringToolkitToFront();
 		FName toolkitName = FoundAssetEditor->GetToolkitFName();
-		
+
 		if (FoundAssetEditor->IsBlueprintEditor())
 		{
 			FKismetEditorUtilities::BringKismetToFocusAttentionOnObject(
@@ -352,7 +298,7 @@ namespace
 				btEditor->FocusAttentionOnNode(closest);
 			}
 		}
-		
+
 		return true;
 	}
 }
@@ -447,7 +393,7 @@ namespace
 		{
 			return false;
 		}
-	
+
 		std::wstring command = *Command;
 		RegSetValueExW(
 			hKey,
@@ -470,6 +416,80 @@ void UListenForLinkServer::Init()
 		Blocker& blocker = GetBlocker();
 		co_await blocker;
 
+		FGraphEditorModule* GraphEditorModule = FModuleManager::GetModulePtr<FGraphEditorModule>(TEXT("GraphEditor"));
+		while (!GraphEditorModule)
+		{
+			co_await blocker;
+			GraphEditorModule = FModuleManager::GetModulePtr<FGraphEditorModule>(TEXT("GraphEditor"));
+		}
+		TArray<FGraphEditorModule::FGraphEditorMenuExtender_SelectedNode>& MenuExtenderDelegates = GraphEditorModule->GetAllGraphEditorContextMenuExtender();
+
+		MenuExtenderDelegates.Add(
+			FGraphEditorModule::FGraphEditorMenuExtender_SelectedNode::CreateLambda(
+				[this](
+				const TSharedRef<FUICommandList> CommandList,
+				const UEdGraph* Graph,
+				const UEdGraphNode* Node,
+				const UEdGraphPin* pin,
+				bool bRes) -> TSharedRef<FExtender>
+				{
+					TSharedRef<FExtender> ContextMenuExtender = MakeShared<FExtender>();
+					if (!Graph || !Node)
+					{
+						return ContextMenuExtender;
+					}
+					const UEdGraphSchema* schema = Graph->GetSchema();
+					UClass* schemaClass = schema->GetClass();
+
+					FName Section = "EdGraphSchemaNodeActions";
+					if (schemaClass->GetName().Equals("AnimationGraphSchema"))
+					{
+						Section = "AnimGraphSchemaNodeActions";
+					}
+					else if (schemaClass->GetName().Equals("AnimationStateMachineSchema"))
+					{
+						Section = "AnimationStateMachineNodeActions";
+					}
+					else if (schemaClass->GetName().Equals("ControlRigGraphSchema"))
+					{
+						Section = "RigVMEditorContextMenuDebug";
+					}
+					else if (schemaClass->GetName().Equals("EdGraphSchema_BehaviorTree"))
+					{
+						Section = "BehaviorTreeGraphSchemaNodeActions";
+					}
+					else if (schemaClass->GetName().Equals("EdGraphSchema_NiagaraSystemOverview"))
+					{
+						Section = "Alignment";
+					}
+
+					ContextMenuExtender->AddMenuExtension(
+						Section,
+						EExtensionHook::After,
+						CommandList,
+						FMenuExtensionDelegate::CreateLambda([Graph, Node](FMenuBuilder& MenuBuilder)
+						{
+							MenuBuilder.AddMenuEntry(
+								FText::FromString("Get Location Link"),
+								FText::FromString("Generates shareable hyperlink to this node"),
+								FSlateIcon(FAppStyle::GetAppStyleSetName(), ""),
+								FUIAction(
+									FExecuteAction::CreateLambda([Graph, Node]()
+									{
+										CreateLocationLink(Graph, FVector2f::Zero(), Node);
+									}),
+									FCanExecuteAction::CreateLambda([Node]() -> bool
+									{
+										return static_cast<bool>(Node);
+									}))
+							);
+						})
+					);
+					
+					return ContextMenuExtender;
+				})
+		);
+
 		FGuid guid = FGuid::NewGuid();
 		FString guidStr = LexToString(guid);
 		FString pipeName = FString::Format(TEXT("\\\\.\\pipe\\{0}"),
@@ -489,8 +509,6 @@ void UListenForLinkServer::Init()
 			0,
 			nullptr
 		);
-
-		Pipe = hPipe;
 
 		FString strBuff;
 		while (true)
@@ -523,11 +541,11 @@ void UListenForLinkServer::Init()
 				DWORD read = 0;
 				GetOverlappedResult(hPipe, &ov, &read, 1);
 				strBuff += buff;
-				
+
 				if (res)
 				{
 					OnMessageReceived(strBuff);
-					
+
 					strBuff = "";
 					DisconnectNamedPipe(hPipe);
 					break;
@@ -542,15 +560,8 @@ void UListenForLinkServer::Init()
 		GetBlocker().Unblock();
 		return true;
 	}), 1.0f);
-
-	StartListeningForInput();
 }
 
 void UListenForLinkServer::Deinit()
 {
-	if (Pipe)
-	{
-		CloseHandle(Pipe);
-	}
-	Pipe = nullptr;
 }
